@@ -16,49 +16,48 @@ export const registerUser = async (req, res) => {
         const existing = await prisma.user.findUnique({ where: { email } });
         if (existing) return res.status(400).json({ error: 'Email already exists' });
 
-        // Upload image to Cloudinary
         let imageUrl = null;
-        if (file) {
-            const result = await cloudinary.uploader.upload_stream(
-                { folder: 'users' },
-                (err, result) => {
-                    if (err) throw new Error('Image upload failed');
-                    return result.secure_url;
-                }
-            );
 
-            // manually upload since we use memoryStorage
-            await new Promise((resolve, reject) => {
+        if (file) {
+            // Use upload_stream with buffer
+            imageUrl = await new Promise((resolve, reject) => {
                 const stream = cloudinary.uploader.upload_stream(
                     { folder: 'users' },
                     (error, result) => {
                         if (error) return reject(error);
-                        imageUrl = result.secure_url;
-                        resolve();
+                        resolve(result.secure_url);
                     }
                 );
-                stream.end(file.buffer);
+                stream.end(file.buffer); // send buffer to stream
             });
         }
 
         const hashed = await bcrypt.hash(password, 10);
+
         const user = await prisma.user.create({
             data: {
                 username,
                 email,
                 password: hashed,
-                imageUrl
-            }
+                imageUrl,
+            },
         });
 
         res.status(201).json({
             message: 'User registered',
-            user: { id: user.id, username: user.username, email: user.email, imageUrl: user.imageUrl }
+            user: {
+                id: user.id,
+                username: user.username,
+                email: user.email,
+                imageUrl: user.imageUrl,
+            },
         });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Register error:', err);
+        res.status(500).json({ error: 'Internal server error', details: err.message });
     }
 };
+
 
 
 export const loginUser = async (req, res) => {
@@ -76,7 +75,7 @@ export const loginUser = async (req, res) => {
 
         const { accessToken, refreshToken } = generateTokens(user);
 
-        console.log('Generated Access Token:', accessToken);  // Debugging
+        // console.log('Generated Access Token:', accessToken);  // Debugging
 
         res.cookie('refreshToken', refreshToken, {
             httpOnly: true,  // Makes the cookie inaccessible to JavaScript
@@ -96,7 +95,6 @@ export const loginUser = async (req, res) => {
         return res.status(500).json({ error: err.message });
     }
 };
-
 
 
 export const refreshAccessToken = async (req, res) => {
@@ -120,5 +118,46 @@ export const refreshAccessToken = async (req, res) => {
         res.json({ accessToken });
     } catch (err) {
         return res.status(403).json({ error: 'Invalid or expired refresh token lol' });
+    }
+};
+
+
+export const getAllUsers = async (req, res) => {
+    try {
+        const users = await prisma.user.findMany(); // Fetch all users from the database
+        res.status(200).json({ users });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+
+
+export const deleteUser = async (req, res) => {
+    const { userId } = req.params;
+
+    try {
+        console.log('Deleting user:', userId);
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+
+        if (!user) {
+            console.log('User not found');
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        if (user.imageUrl) {
+            const fileName = user.imageUrl.split('/').pop().split('.')[0];
+            const publicId = `users/${fileName}`;
+            console.log('Deleting image from Cloudinary:', publicId);
+            await cloudinary.uploader.destroy(publicId);
+        }
+
+        await prisma.user.delete({ where: { id: userId } });
+        console.log('User deleted successfully');
+
+        res.status(200).json({ message: 'User and image deleted successfully' });
+    } catch (err) {
+        console.error('Delete error:', err);
+        res.status(500).json({ error: 'Internal server error', details: err.message });
     }
 };

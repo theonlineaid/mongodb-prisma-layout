@@ -6,6 +6,7 @@
 
 generator client {
   provider = "prisma-client-js"
+  output   = "./@prisma/client"
 }
 
 datasource db {
@@ -21,4 +22,15 @@ model User {
   imageUrl  String?
   role      String   @default("user") // roles: 'user', 'admin'
   createdAt DateTime @default(now())
+  Layout    Layout[]
+}
+
+model Layout {
+  id         String  @id @default(auto()) @map("_id") @db.ObjectId
+  name       String
+  is_default Boolean @default(false)
+  is_active  Boolean @default(false)
+
+  userId String @db.ObjectId
+  user   User   @relation(fields: [userId], references: [id])
 }
